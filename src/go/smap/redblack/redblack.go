@@ -143,25 +143,5 @@ func (m *RedBlack) insert(node *Node, key smap.Key, value smap.Value) *Node {
 	return node
 }
 
-//Visitor is a function that receives a Node and returns a boolean,
-//true means the tree traversal should continue
-//this may go to helpers_test if it's not useful for the exported implementation.
-type visitor func(n *Node) bool
-
-//An in-order traversal of a Tree Node.
-func (n *Node) inOrder(visit visitor) {
-	if n == nil {
-		return
-	}
-	n.Left.inOrder(visit)
-	visit(n)
-	n.Right.inOrder(visit)
-}
-
-//An in-order traversal of a RedBlack
-func (m *RedBlack) inOrder(f visitor) {
-	m.root.inOrder(f)
-}
-
 //enforce redblack implements smap
 var _ smap.SMap = &RedBlack{}

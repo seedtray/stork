@@ -32,7 +32,6 @@ func checkOrderInvariant(s smap.SMap, t *testing.T) {
 		last = current.(str)
 		return true
 	})
-
 }
 
 func TestTwo(t *testing.T) {

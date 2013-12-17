@@ -47,20 +47,26 @@ func (m *RedBlack) maxHeight() int {
 //then this implements an in-order full scan iterator
 //It is meant to fullfill both a full scan and a scan starting from a given value.
 type Scanner struct {
-	stack  *fixedNodeStack
-	node   *Node
-	closed bool
+	stack *fixedNodeStack
+	node  *Node
 }
 
-//Close closes the iterator. Next() will return true hereafter.
-func (s *Scanner) Close() {
-	s.closed = true
+type EmptyScanner struct{}
+
+func (s EmptyScanner) Next() bool {
+	return false
+}
+func (s EmptyScanner) Value() smap.Value {
+	panic("Empty Scanner")
+}
+func (s EmptyScanner) Key() smap.Key {
+	panic("Empty Scanner")
 }
 
 //Next advances the iterator one step and if returns true, an entry will be available upon calling Entry()
 func (s *Scanner) Next() bool {
 	stack := s.stack
-	if s.closed || stack.Empty() {
+	if stack.Empty() {
 		return false
 	}
 	s.node = stack.Pop()
@@ -70,61 +76,29 @@ func (s *Scanner) Next() bool {
 	return true
 }
 
-//Entry returns the current entry in the iterator.
+//Value returns the current value in the iterator.
 func (s *Scanner) Value() smap.Value {
 	return s.node.entry.GetValue()
 }
 
-//Scan() returns a ScannerBuilder for specifying a scan configuration in a fluent interface.
-func (m *RedBlack) Scan() smap.ScannerBuilder {
-	return &ScannerBuilder{m, nil, nil}
+//Key returns the current key in the iterator.
+func (s *Scanner) Key() smap.Key {
+	return s.node.entry.GetKey()
 }
 
-//ScannerBuilder is a helper for specifying different scan types
-type ScannerBuilder struct {
-	m           *RedBlack
-	left, right *smap.Edge
-}
-
-//From specifies that the scan starts from a given key and that the range is left-closed.
-func (sb *ScannerBuilder) From(k smap.Key) smap.ScannerBuilder {
-	sb.left = &smap.Edge{k, true}
-	return sb
-}
-
-//After specifies that the scan starts from a given key and that the range is left-open.
-func (sb *ScannerBuilder) After(k smap.Key) smap.ScannerBuilder {
-	sb.left = &smap.Edge{k, false}
-	return sb
-}
-
-//To specifies that the scan stops at a given key and that the range is right-closed.
-func (sb *ScannerBuilder) To(k smap.Key) smap.ScannerBuilder {
-	sb.right = &smap.Edge{k, true}
-	return sb
-}
-
-//Before specifies that the scan stops at a given key and that the range is right-open.
-func (sb *ScannerBuilder) Before(k smap.Key) smap.ScannerBuilder {
-	sb.right = &smap.Edge{k, false}
-	return sb
-}
-
-//Start builds the scanner according to the already given configuration.
-//A non configured ScannerBuilder will return a Full Scanner.
-func (sb *ScannerBuilder) Start() smap.Iterator {
-	m := sb.m
-	if sb.left == nil && sb.right == nil {
-		return m.FullScan()
-	} else if sb.right == nil {
-		return m.UpToScan(*sb.right)
-	} else if sb.left == nil {
-		return m.FromScan(*sb.left)
+//Scan() returns an Iterator that iterates over the tree elements in order within the given interval
+func (m *RedBlack) Range(i smap.Interval) smap.Iterator {
+	if i.From == smap.Inf && i.To == smap.Inf {
+		return m.fullScan()
+	} else if i.To == smap.Inf {
+		return m.upToScan(i.To)
+	} else if i.From == smap.Inf {
+		return m.fromScan(i.From)
 	} else {
-		if sb.left.Key.Cmp(sb.right.Key) > 0 {
-			return &Scanner{}
+		if i.From.Key.Cmp(i.To.Key) > 0 {
+			return EmptyScanner{}
 		} else {
-			return m.RangeScan(*sb.left, *sb.right)
+			return m.rangeScan(i.From, i.To)
 		}
 	}
 }
@@ -132,53 +106,65 @@ func (sb *ScannerBuilder) Start() smap.Iterator {
 //upToScanner implements a scanner with a max boundary.
 type upToScanner struct {
 	*Scanner
-	boundary *Node
-	closed   bool
+	boundary     *Node
+	hit_boundary bool
 }
 
 //Next advances the iterator one step and if returns true, an entry will be available upon calling Entry()
 func (u *upToScanner) Next() bool {
-	if u.closed {
-		return false
-	}
-	if !u.Scanner.Next() {
-		u.Close()
+	if u.hit_boundary || !u.Scanner.Next() {
 		return false
 	} else {
 		if u.Scanner.node == u.boundary {
-			u.Close()
+			u.hit_boundary = true
 		}
 		return true
 	}
 }
 
 //FromScan returns an iterator that scans through the RedBlack keys in order starting at the specified edge.
-func (m *RedBlack) FromScan(from smap.Edge) smap.Iterator {
+func (m *RedBlack) fromScan(from smap.Edge) smap.Iterator {
 	stack := m.buildLeftBoundStack(from)
-	return &Scanner{stack, nil, false}
+	return &Scanner{stack: stack}
 }
 
 //FullScan returns an iterator that scans through all the RedBlack keys in order
-func (m *RedBlack) FullScan() smap.Iterator {
+func (m *RedBlack) fullScan() smap.Iterator {
 	stack := m.makeHeightStack()
 	//populate the stack with all the left wing roots
 	for node := m.root; node != nil; node = node.Left {
 		stack.Push(node)
 	}
-	return &Scanner{stack, nil, false}
+	return &Scanner{stack: stack}
 }
 
 //FromScan returns an iterator that scans through the RedBlack keys in order stopping at the specified edge.
-func (m *RedBlack) UpToScan(to smap.Edge) smap.Iterator {
+func (m *RedBlack) upToScan(to smap.Edge) smap.Iterator {
 	boundary := m.getRightBound(to)
-	scanner := m.FullScan().(*Scanner)
-	return &upToScanner{scanner, boundary, false}
+	if boundary == nil {
+		return EmptyScanner{}
+	} else {
+		scanner := m.fullScan().(*Scanner)
+		return &upToScanner{scanner, boundary, false}
+	}
 }
 
 //RangeScan returns an iterator that scans through the RedBlack keys in order between the given start and end edges.
-func (m *RedBlack) RangeScan(from, to smap.Edge) smap.Iterator {
+func (m *RedBlack) rangeScan(from, to smap.Edge) smap.Iterator {
 	boundary := m.getRightBound(to)
-	scanner := m.FromScan(from).(*Scanner)
+	if boundary == nil {
+		return EmptyScanner{}
+	}
+	scanner := m.fromScan(from).(*Scanner)
+	//abort if scanner stack is empty, further checks need a non-empty stack.
+	if scanner.stack.Empty() {
+		return EmptyScanner{}
+	}
+	rightKey := boundary.entry.GetKey()
+	leftKey := scanner.stack.Peek().entry.GetKey()
+	if leftKey.Cmp(rightKey) > 0 {
+		return EmptyScanner{}
+	}
 	return &upToScanner{scanner, boundary, false}
 }
 
@@ -195,7 +181,11 @@ func (m *RedBlack) buildLeftBoundStack(left smap.Edge) *fixedNodeStack {
 	key := left.Key
 	for current := m.root; current != nil; {
 		if cmp := current.entry.GetKey().Cmp(key); cmp == 0 {
-			if left.Closed {
+			if left.Open {
+				for current = current.Right; current != nil; current = current.Left {
+					stack.Push(current)
+				}
+			} else {
 				stack.Push(current)
 			}
 			break
@@ -212,16 +202,21 @@ func (m *RedBlack) buildLeftBoundStack(left smap.Edge) *fixedNodeStack {
 //find the right boundary in the RedBlack given a right edge.
 //The returning node will have the greater key
 //such that node.Key <= right.Key (< for open edge).
+//If returns nil, it means the right edge is less than all the keys in the tree
 //The edge key does not need to be in the RedBlack
 func (m *RedBlack) getRightBound(right smap.Edge) *Node {
 	var last *Node = nil
 	key := right.Key
-	if right.Key == nil {
-		return nil
-	}
 	for current := m.root; current != nil; {
 		if cmp := current.entry.GetKey().Cmp(key); cmp == 0 {
-			return current
+			if right.Open {
+				for current = current.Left; current != nil; current = current.Right {
+					last = current
+				}
+				return last
+			} else {
+				return current
+			}
 		} else if cmp > 0 {
 			current = current.Left
 		} else if cmp < 0 {

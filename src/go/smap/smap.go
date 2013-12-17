@@ -10,10 +10,18 @@ type Key interface {
 type Value interface{}
 
 //Edge represents a boundary in a range. The Key indicates the boundary value
-//and Closed indicates if that key should be included in the range or not.
+//and Open indicates if the interval is Open (the edge Key is considered outside the edge)
 type Edge struct {
-	Key    Key
-	Closed bool
+	Key  Key
+	Open bool
+}
+
+//Inf, or the Zero value edge is represents +-infinity.
+var Inf Edge = Edge{}
+
+//Interval representing the boundaries of a range scan.
+type Interval struct {
+	From, To Edge
 }
 
 //SMap is the api of a sorted map. It comprises get, put and the scanner interface.
@@ -25,35 +33,16 @@ type SMap interface {
 //SMapReader is a read only SMap
 type SMapReader interface {
 	Get(key Key) (v Value, found bool)
+	Range(i Interval) Iterator
 	Len() int
 	Size() int
-	Scanner
-}
-
-//Scanners allow range queries over an Smap, returning an Iterator of values.
-type Scanner interface {
-	Scan() ScannerBuilder
-	FromScan(from Edge) Iterator
-	UpToScan(upto Edge) Iterator
-	RangeScan(from Edge, to Edge) Iterator
-	FullScan() Iterator
 }
 
 //Iterator is the interface for all scan/traversal methods in llrb.
 //Next() advances the iterator one step. If it returns true, there will be a new
-//Entry available by calling Entry()
-//Close() will stop the iterator and cause Next() to return always false from then on.
+//Value available by calling Value()
 type Iterator interface {
 	Next() bool
+	Key() Key
 	Value() Value
-	Close()
-}
-
-//ScannerBuilder is a helper for building range scans, with a fluent interface.
-type ScannerBuilder interface {
-	From(key Key) ScannerBuilder
-	To(key Key) ScannerBuilder
-	After(key Key) ScannerBuilder
-	Before(key Key) ScannerBuilder
-	Start() Iterator
 }

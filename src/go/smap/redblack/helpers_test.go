@@ -1,6 +1,7 @@
 //Helpers for testing SMaps with different Key implementations.
 //Implements string and int Keys
 //Also includes a loader for test data
+//Also implements an in-order node traversal for invariant checking.
 package redblack
 
 import (
@@ -92,3 +93,22 @@ func nnFactory(key smap.Key, value smap.Value) Entry {
 
 //enforce nnFactory implement EntryFactory
 var _ EntryFactory = nnFactory
+
+//Visitor is a function that receives a Node and returns a boolean,
+//true means the tree traversal should continue
+type visitor func(n *Node) bool
+
+//An in-order traversal of a Tree Node.
+func (n *Node) inOrder(visit visitor) {
+	if n == nil {
+		return
+	}
+	n.Left.inOrder(visit)
+	visit(n)
+	n.Right.inOrder(visit)
+}
+
+//An in-order traversal of a RedBlack
+func (m *RedBlack) inOrder(f visitor) {
+	m.root.inOrder(f)
+}
