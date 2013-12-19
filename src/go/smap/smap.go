@@ -39,8 +39,11 @@ type SMapReader interface {
 }
 
 //Iterator is the interface for all scan/traversal methods in llrb.
-//Next() advances the iterator one step. If it returns true, there will be a new
-//Value available by calling Value()
+//Next() advances the iterator one step.
+//Calling Value() or Key() before Next() may panic or return unmeaningful results.
+//If Next() returns true, Value() will return the next element's Value and Key() will return the next element's Key.
+//If Next() returns false, it means there are no more elements to iterate and Value() and Key() should not be called again.
+//Calling Value() or Key() after Next() returns false may panic or return unmeaningful results.
 type Iterator interface {
 	Next() bool
 	Key() Key
