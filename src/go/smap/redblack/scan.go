@@ -47,8 +47,9 @@ func (m *RedBlack) maxHeight() int {
 //then this implements an in-order full scan iterator
 //It is meant to fullfill both a full scan and a scan starting from a given value.
 type Scanner struct {
-	stack *fixedNodeStack
-	node  *Node
+	stack  *fixedNodeStack
+	node   *Node
+	closed bool
 }
 
 type EmptyScanner struct{}
@@ -63,10 +64,16 @@ func (s EmptyScanner) Key() smap.Key {
 	panic("Empty Scanner")
 }
 
+func (s EmptyScanner) Close() {}
+
 //Next advances the iterator one step and if returns true, an entry will be available upon calling Entry()
 func (s *Scanner) Next() bool {
+	if s.closed {
+		return false
+	}
 	stack := s.stack
 	if stack.Empty() {
+		s.Close()
 		return false
 	}
 	s.node = stack.Pop()
@@ -84,6 +91,12 @@ func (s *Scanner) Value() smap.Value {
 //Key returns the current key in the iterator.
 func (s *Scanner) Key() smap.Key {
 	return s.node.entry.GetKey()
+}
+
+func (s *Scanner) Close() {
+	s.stack = nil
+	s.node = nil
+	s.closed = true
 }
 
 //Scan() returns an Iterator that iterates over the tree elements in order within the given interval
@@ -108,11 +121,16 @@ type upToScanner struct {
 	*Scanner
 	boundary     *Node
 	hit_boundary bool
+	closed       bool
 }
 
 //Next advances the iterator one step and if returns true, an entry will be available upon calling Entry()
 func (u *upToScanner) Next() bool {
+	if u.closed {
+		return false
+	}
 	if u.hit_boundary || !u.Scanner.Next() {
+		u.Close()
 		return false
 	} else {
 		if u.Scanner.node == u.boundary {
@@ -145,7 +163,7 @@ func (m *RedBlack) upToScan(to smap.Edge) smap.Iterator {
 		return EmptyScanner{}
 	} else {
 		scanner := m.fullScan().(*Scanner)
-		return &upToScanner{scanner, boundary, false}
+		return &upToScanner{Scanner: scanner, boundary: boundary}
 	}
 }
 
@@ -165,7 +183,7 @@ func (m *RedBlack) rangeScan(from, to smap.Edge) smap.Iterator {
 	if leftKey.Cmp(rightKey) > 0 {
 		return EmptyScanner{}
 	}
-	return &upToScanner{scanner, boundary, false}
+	return &upToScanner{Scanner: scanner, boundary: boundary}
 }
 
 //allocate a stack suitable for traversing the tree.
